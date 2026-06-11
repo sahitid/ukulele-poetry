@@ -1,0 +1,913 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rough draft — the instrument that writes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<style>
+  :root{
+    --ink:#0b0e14;
+    --paper:#ede6d6;
+    --faded:#8b8576;
+    --mood-h:200; --mood-s:55%; --mood-l:60%;
+    --energy:0;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--ink);color:var(--paper);
+    font-family:"Cormorant Garamond", Georgia, serif;overflow:hidden}
+
+  #wash{
+    position:fixed;inset:-20%;
+    background:
+      radial-gradient(60% 70% at 30% 70%,
+        hsla(var(--mood-h),var(--mood-s),20%, .6), transparent 70%),
+      radial-gradient(50% 60% at 75% 25%,
+        hsla(calc(var(--mood-h) + 30),calc(var(--mood-s) - 15%),15%, .55), transparent 70%);
+    filter:saturate(calc(.55 + var(--energy)*1.1)) brightness(calc(.85 + var(--energy)*.5));
+    transition:background 2.5s ease, filter .25s linear, opacity 1.5s ease;
+    animation:drift 40s ease-in-out infinite alternate;
+  }
+  @keyframes drift{from{transform:translate3d(-2%,1%,0) scale(1)}
+    to{transform:translate3d(2%,-2%,0) scale(1.06)}}
+
+  body.paused #wash{opacity:.35}
+  body.paused #cursor{animation:none;opacity:.2}
+  body.paused #poem{opacity:.6;transition:opacity 1.5s ease}
+
+  .pulse{
+    position:fixed;left:50%;top:50%;width:40vmin;height:40vmin;
+    margin:-20vmin 0 0 -20vmin;border-radius:50%;pointer-events:none;
+    border:2px solid hsla(var(--mood-h),var(--mood-s),70%,.8);
+    animation:pulse 1.1s ease-out forwards;
+  }
+  @keyframes pulse{from{transform:scale(.2);opacity:.9}to{transform:scale(2.6);opacity:0}}
+
+  #grain{position:fixed;inset:0;pointer-events:none;opacity:.05;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E")}
+
+  #stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:6vh 8vw}
+  #poem{width:min(900px,84vw);max-height:78vh;overflow:hidden;
+    display:flex;flex-direction:column;justify-content:flex-end;
+    font-size:clamp(26px,3.4vw,44px);line-height:1.55;font-weight:400}
+  .line{opacity:0;transform:translateY(10px);
+    transition:opacity 1.2s ease,transform 1.2s ease;text-wrap:balance}
+  .line.shown{opacity:1;transform:none}
+  .line.old{opacity:.35}
+  .line.older{opacity:.14}
+  .line em{font-style:italic;color:hsl(var(--mood-h),var(--mood-s),var(--mood-l))}
+  .struck{color:var(--faded);text-decoration:line-through;
+    text-decoration-thickness:1.5px;margin-right:.35em}
+  #cursor{display:inline-block;width:.55em;height:1.05em;vertical-align:-0.15em;
+    margin-left:.12em;background:hsl(var(--mood-h),var(--mood-s),var(--mood-l));
+    animation:blink 1.1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  #strip{position:fixed;left:0;right:0;bottom:0;display:flex;gap:2.4vw;
+    align-items:center;padding:16px 3vw 18px;
+    font-family:"JetBrains Mono",ui-monospace,monospace;
+    font-size:12px;letter-spacing:.12em;text-transform:lowercase;
+    color:color-mix(in srgb,var(--paper) 55%,transparent);
+    border-top:1px solid color-mix(in srgb,var(--paper) 12%,transparent);
+    background:color-mix(in srgb,var(--ink) 70%,transparent);
+    backdrop-filter:blur(6px)}
+  #strip b{font-weight:400;color:hsl(var(--mood-h),var(--mood-s),var(--mood-l))}
+  #moodDot{display:inline-block;width:9px;height:9px;border-radius:50%;
+    margin-right:6px;background:hsl(var(--mood-h),var(--mood-s),var(--mood-l));
+    transition:background 1.5s ease}
+  #meter{flex:1;height:3px;border-radius:2px;
+    background:color-mix(in srgb,var(--paper) 10%,transparent);overflow:hidden}
+  #meter i{display:block;height:100%;width:calc(var(--energy)*100%);
+    background:hsl(var(--mood-h),var(--mood-s),var(--mood-l));
+    transition:width .12s linear}
+  #status{min-width:18ch}
+  #finishBtn{
+    font-family:inherit;font-size:inherit;letter-spacing:inherit;
+    text-transform:inherit;cursor:pointer;
+    color:var(--paper);background:transparent;
+    border:1px solid color-mix(in srgb,var(--paper) 30%,transparent);
+    border-radius:3px;padding:7px 14px;
+  }
+  #finishBtn:hover{border-color:hsl(var(--mood-h),var(--mood-s),var(--mood-l))}
+  #keyCtl{display:flex;align-items:center;gap:6px}
+  #keyCtl button{
+    font-family:inherit;font-size:11px;letter-spacing:.1em;
+    text-transform:lowercase;cursor:pointer;color:var(--paper);
+    background:transparent;border:1px solid color-mix(in srgb,var(--paper) 30%,transparent);
+    border-radius:3px;padding:6px 10px}
+  #keyCtl button:hover{border-color:hsl(var(--mood-h),var(--mood-s),var(--mood-l))}
+  #keyCtl input{width:24ch;padding:6px 8px;border-radius:3px;
+    border:1px solid color-mix(in srgb,var(--paper) 25%,transparent);
+    background:transparent;color:var(--paper);
+    font-family:inherit;font-size:11px}
+  #meter{position:relative;overflow:visible}
+  #gateTick{position:absolute;top:-3px;width:1.5px;height:9px;
+    background:color-mix(in srgb,var(--paper) 50%,transparent)}
+  #newDraftTop{
+    position:fixed;top:20px;right:24px;z-index:5;
+    font-family:"JetBrains Mono",ui-monospace,monospace;
+    font-size:12px;letter-spacing:.16em;text-transform:lowercase;
+    color:var(--ink);background:hsl(38,80%,60%);
+    border:none;border-radius:3px;padding:10px 18px;cursor:pointer;
+    box-shadow:0 4px 18px rgba(0,0,0,.35)}
+  #newDraftTop:hover{background:hsl(38,90%,66%)}
+
+  .overlay{position:fixed;inset:0;z-index:10;display:flex;flex-direction:column;
+    gap:26px;align-items:center;justify-content:center;text-align:center;
+    background:color-mix(in srgb,var(--ink) 96%,transparent);padding:5vh 4vw;
+    opacity:1;transition:opacity .8s ease}
+  .overlay.hidden{display:none}
+  .overlay.fadein{animation:fadein .9s ease both}
+  @keyframes fadein{from{opacity:0}to{opacity:1}}
+  .overlay h1{font-size:clamp(30px,4.6vw,58px);font-weight:500;font-style:italic;
+    max-width:20ch;line-height:1.25}
+  .overlay p{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:13px;
+    letter-spacing:.12em;color:color-mix(in srgb,var(--paper) 55%,transparent);
+    max-width:56ch;line-height:1.9}
+  .btn{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;
+    letter-spacing:.16em;text-transform:lowercase;color:var(--ink);
+    background:hsl(38,70%,62%);border:none;border-radius:3px;
+    padding:12px 22px;cursor:pointer}
+  .btn.ghost{background:transparent;color:var(--paper);
+    border:1px solid color-mix(in srgb,var(--paper) 30%,transparent)}
+  #keywrap{display:none;gap:10px}
+  #keywrap input{width:38ch;padding:12px;border-radius:3px;
+    border:1px solid color-mix(in srgb,var(--paper) 25%,transparent);
+    background:transparent;color:var(--paper);
+    font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px}
+  .row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+
+  /* ───── binding (loading) screen ───── */
+  #binding{gap:18px}
+  #bindCursor{width:14px;height:30px;
+    background:hsl(var(--mood-h),var(--mood-s),var(--mood-l));
+    animation:blink 1s steps(1) infinite}
+  #bindMsg{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:13px;
+    letter-spacing:.2em;color:color-mix(in srgb,var(--paper) 60%,transparent)}
+
+  /* ───── final draft: the manuscript page ───── */
+  #final{justify-content:flex-start;overflow-y:auto;gap:18px}
+  #finalBar{display:flex;gap:18px;flex-wrap:wrap;justify-content:center;
+    font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;
+    letter-spacing:.1em;text-transform:lowercase;
+    color:color-mix(in srgb,var(--paper) 50%,transparent)}
+  .seg{display:flex;gap:0;border:1px solid color-mix(in srgb,var(--paper) 22%,transparent);
+    border-radius:3px;overflow:hidden}
+  .seg button{font:inherit;letter-spacing:inherit;color:inherit;cursor:pointer;
+    background:transparent;border:none;padding:7px 11px;
+    border-right:1px solid color-mix(in srgb,var(--paper) 14%,transparent)}
+  .seg button:last-child{border-right:none}
+  .seg button.on{background:hsl(var(--mood-h),var(--mood-s),var(--mood-l));
+    color:var(--ink)}
+
+  #page{
+    --pg-bg:#f2ecdd; --pg-fg:#211c12; --pg-fade:#9a907c;
+    width:min(620px,92vw);
+    background:var(--pg-bg);color:var(--pg-fg);
+    border-radius:4px;
+    padding:clamp(34px,5vw,58px) clamp(30px,5vw,56px);
+    text-align:left;
+    box-shadow:0 30px 80px rgba(0,0,0,.55);
+    flex-shrink:0;
+  }
+  #page.theme-ink{--pg-bg:#11141c;--pg-fg:#ede6d6;--pg-fade:#6f6a5d}
+  #page.theme-mood{--pg-fg:#ede6d6;--pg-fade:rgba(237,230,214,.45)}
+  #page.font-serif{font-family:"Cormorant Garamond",Georgia,serif}
+  #page.font-mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+  #page.font-sans{font-family:ui-sans-serif,system-ui,"Helvetica Neue",sans-serif}
+  #page.align-center{text-align:center}
+  #page.align-center .pline{justify-content:center}
+  #page.size-s{--pg-size:15px}
+  #page.size-m{--pg-size:18px}
+  #page.size-l{--pg-size:22px}
+
+  #pTitle{font-size:calc(var(--pg-size,18px)*1.55);font-weight:600;
+    font-style:italic;line-height:1.3;margin-bottom:8px}
+  #page.font-mono #pTitle{font-style:normal;font-weight:400}
+  #pMeta{font-family:"JetBrains Mono",ui-monospace,monospace;
+    font-size:10.5px;letter-spacing:.16em;text-transform:lowercase;
+    color:var(--pg-fade);margin-bottom:26px}
+  #pLines{display:flex;flex-direction:column;gap:2px}
+  .pline{display:flex;align-items:baseline;gap:14px;
+    padding:3px 8px;margin:0 -8px;border-radius:3px;
+    font-size:var(--pg-size,18px);line-height:1.65;cursor:default}
+  .pline:hover,#page.notes-on .pline.noted{background:var(--emA,transparent)}
+  .pnote{font-family:"JetBrains Mono",ui-monospace,monospace;
+    font-size:10px;letter-spacing:.08em;text-transform:lowercase;
+    color:var(--emC,var(--pg-fade));white-space:nowrap;
+    opacity:0;transition:opacity .25s ease;margin-left:auto;
+    border-left:2px solid var(--emC,var(--pg-fade));padding-left:8px}
+  .pline:hover .pnote,#page.notes-on .pnote{opacity:1}
+  #pFoot{font-family:"JetBrains Mono",ui-monospace,monospace;
+    font-size:10px;letter-spacing:.16em;text-transform:lowercase;
+    color:var(--pg-fade);margin-top:30px;
+    border-top:1px solid var(--emBorder,rgba(0,0,0,.12));padding-top:14px}
+  #page.theme-ink #pFoot,#page.theme-mood #pFoot{--emBorder:rgba(255,255,255,.14)}
+
+  @media (max-width:640px){
+    .pline{flex-wrap:wrap;gap:4px}
+    .pnote{white-space:normal;margin-left:0;width:100%}
+  }
+  @media (prefers-reduced-motion:reduce){
+    #wash{animation:none}.line{transition:opacity .3s ease}.pulse{display:none}}
+</style>
+</head>
+<body>
+<div id="wash"></div>
+<div id="grain"></div>
+
+<div id="stage"><div id="poem"></div></div>
+<button id="newDraftTop" title="wipe the page + restart recording">new draft</button>
+
+<div id="strip">
+  <span id="status">waiting</span>
+  <span>note <b id="tNote">—</b></span>
+  <span>strums/min <b id="tStrum">0</b></span>
+  <span>energy <b id="tEnergy">0%</b></span>
+  <span>dark <b id="tDark">0%</b></span>
+  <span><span id="moodDot"></span><b id="tMood">—</b></span>
+  <div id="meter"><i></i><s id="gateTick"></s></div>
+  <span id="keyCtl">
+    <button id="keyBtn">key: blank</button>
+    <input id="keyField" type="password" placeholder="sk-ant-…" style="display:none">
+    <button id="keyOk" style="display:none">save</button>
+    <button id="keyDel" style="display:none">delete</button>
+  </span>
+  <button id="finishBtn" title="or press F">finish draft</button>
+</div>
+
+<div class="overlay" id="gate">
+  <h1>play, and it writes.<br>badly at first. that's the point.</h1>
+  <p>a ukulele feeds a poet. it calibrates to the room, ignores talking,
+     and only counts in-tune, held notes as music. color is the mood it hears,
+     pulses are your strums, and the draft revises itself in public.
+     F finishes the draft · C recalibrates the room · [ and ] adjust sensitivity.
+     your api key lives in the bottom bar (only needed outside claude.ai).</p>
+  <div class="row">
+    <button class="btn" id="startBtn">start listening</button>
+    <button class="btn ghost" id="simBtn">simulate (no uke)</button>
+  </div>
+</div>
+
+<div class="overlay hidden" id="binding">
+  <div id="bindCursor"></div>
+  <div id="bindMsg">binding the draft…</div>
+</div>
+
+<div class="overlay hidden" id="final">
+  <div id="finalBar">
+    <div class="seg" data-set="theme">
+      <button data-v="theme-paper" class="on">paper</button>
+      <button data-v="theme-ink">ink</button>
+      <button data-v="theme-mood">mood</button>
+    </div>
+    <div class="seg" data-set="font">
+      <button data-v="font-serif" class="on">serif</button>
+      <button data-v="font-mono">mono</button>
+      <button data-v="font-sans">sans</button>
+    </div>
+    <div class="seg" data-set="size">
+      <button data-v="size-s">s</button>
+      <button data-v="size-m" class="on">m</button>
+      <button data-v="size-l">l</button>
+    </div>
+    <div class="seg" data-set="align">
+      <button data-v="align-left" class="on">left</button>
+      <button data-v="align-center">center</button>
+    </div>
+    <div class="seg">
+      <button id="notesToggle">notes: hover</button>
+    </div>
+  </div>
+
+  <div id="page" class="theme-paper font-serif size-m align-left">
+    <div id="pTitle"></div>
+    <div id="pMeta"></div>
+    <div id="pLines"></div>
+    <div id="pFoot"></div>
+  </div>
+
+  <div class="row">
+    <button class="btn" id="dlImage">save as image</button>
+    <button class="btn" id="shareTweet">share on x</button>
+    <button class="btn ghost" id="dlPoem">poem .txt</button>
+    <button class="btn ghost" id="dlAudio">recording</button>
+    <button class="btn ghost" id="newDraft">new draft</button>
+    <button class="btn ghost" id="closeFinal">keep playing</button>
+  </div>
+</div>
+
+<script>
+/* ───────── state ───────── */
+const S={
+  audio:null,analyser:null,td:null,
+  running:false,sim:false,
+  calibrating:false,calSamples:[],noiseFloor:0.006,sens:1,
+  events:[],strums:[],
+  rms:0,rmsAvg:0.0001,
+  candPc:-1,candFreq:0,candFrames:0,curPc:null,lastPitchT:-1e9,lastEventT:0,
+  lastNote:"—",
+  poem:[],writing:false,apiKey:null,lastCall:0,
+  silenceSince:-1e9,
+  mood:"silent",moodScore:0,moodHist:[],err:null,toast:null,toastT:0,
+  recorder:null,recChunks:[],finalOpen:false,
+  title:null,annotations:{},titledAt:-1,notesOn:false,
+};
+const NOTE_NAMES=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+const CALL_EVERY=14000, WINDOW=12000, PAUSE_AFTER=4000;
+const $=id=>document.getElementById(id);
+
+const MOODS={
+  frantic:      {h:2,  s:78,l:60},
+  restless:     {h:18, s:70,l:58},
+  triumphant:   {h:33, s:80,l:60},
+  joyful:       {h:48, s:85,l:62},
+  playful:      {h:150,s:60,l:58},
+  tender:       {h:330,s:55,l:68},
+  contemplative:{h:200,s:55,l:62},
+  wistful:      {h:228,s:50,l:64},
+  melancholy:   {h:252,s:45,l:58},
+  brooding:     {h:275,s:50,l:52},
+  silent:       {h:220,s:15,l:45},
+};
+function emotionColor(word){
+  if(MOODS[word]) return MOODS[word];
+  let h=0; for(const c of word) h=(h*31+c.charCodeAt(0))%360;
+  return {h,s:55,l:55};
+}
+
+/* ───────── audio in ───────── */
+async function startMic(){
+  const stream=await navigator.mediaDevices.getUserMedia({audio:{
+    echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+  S.audio=new (window.AudioContext||window.webkitAudioContext)();
+  const src=S.audio.createMediaStreamSource(stream);
+  S.analyser=S.audio.createAnalyser();
+  S.analyser.fftSize=4096;
+  src.connect(S.analyser);
+  S.td=new Float32Array(S.analyser.fftSize);
+  try{
+    S.recorder=new MediaRecorder(stream);
+    S.recChunks=[];
+    S.recorder.ondataavailable=e=>{if(e.data.size)S.recChunks.push(e.data)};
+    S.recorder.start(1000);
+  }catch(e){console.warn("recording unavailable",e)}
+  recalibrate();
+  loop();
+}
+
+/* ───────── music gates (speech fails, strings pass) ───────── */
+function inputGate(){return Math.max(0.009,S.noiseFloor*2.6)*S.sens}
+function recalibrate(){
+  S.calibrating=true;S.calSamples=[];
+  setTimeout(()=>{
+    const xs=S.calSamples;
+    const mean=xs.reduce((a,b)=>a+b,0)/Math.max(1,xs.length);
+    const sd=Math.sqrt(xs.reduce((a,b)=>a+(b-mean)**2,0)/Math.max(1,xs.length));
+    S.noiseFloor=Math.max(0.005, mean+3*sd);
+    S.calibrating=false;
+    S.toast="recalibrated · floor "+S.noiseFloor.toFixed(3);S.toastT=performance.now();
+  },1400);
+}
+function detectPitch(buf,sr){
+  let r0=0;
+  for(let i=0;i<buf.length;i++) r0+=buf[i]*buf[i];
+  S.rms=Math.sqrt(r0/buf.length);
+  if(S.rms<inputGate()) return null;
+  const SIZE=buf.length;
+  const MAX=Math.floor(sr/190), MIN=Math.floor(sr/1100);
+  let best=-1,bestC=0;
+  for(let lag=MIN;lag<=MAX;lag++){
+    let c=0;
+    for(let i=0;i<SIZE-lag;i++) c+=buf[i]*buf[i+lag];
+    if(c>bestC){bestC=c;best=lag}
+  }
+  if(best<0) return null;
+  if(bestC/r0<0.5) return null;
+  const f=sr/best;
+  if(f<190||f>1100) return null;
+  const midiFloat=69+12*Math.log2(f/440);
+  if(Math.abs(midiFloat-Math.round(midiFloat))>0.42) return null;
+  return {f,midi:Math.round(midiFloat)};
+}
+
+function loop(){
+  if(!S.running) return;
+  requestAnimationFrame(loop);
+  if(S.sim){simulateTick();return}
+  S.analyser.getFloatTimeDomainData(S.td);
+  const now=performance.now();
+  const p=detectPitch(S.td,S.audio.sampleRate);
+
+  if(S.calibrating){S.calSamples.push(S.rms);renderStrip(now);return}
+
+  S.rmsAvg=S.rmsAvg*0.97+S.rms*0.03;
+  if(S.rms>Math.max(S.noiseFloor*4,S.rmsAvg*2.2)
+     && now-S.lastPitchT<350
+     && (!S.strums.length||now-S.strums.at(-1)>180)){
+    S.strums.push(now);S.silenceSince=now;firePulse();
+  }
+  S.strums=S.strums.filter(t=>now-t<WINDOW);
+
+  if(p){
+    const pc=((p.midi%12)+12)%12;
+    const stable=S.candFreq&&Math.abs(p.f-S.candFreq)/S.candFreq<0.025;
+    if(pc===S.candPc&&stable) S.candFrames++;
+    else {S.candPc=pc;S.candFreq=p.f;S.candFrames=1}
+    if(S.candFrames>=4 && (pc!==S.curPc||now-S.lastEventT>400)){
+      S.events.push({pc,midi:p.midi,t:now});
+      S.curPc=pc;S.lastEventT=now;S.silenceSince=now;
+      S.lastNote=NOTE_NAMES[pc]+(Math.floor(p.midi/12)-1);
+    }
+    S.lastPitchT=now;
+  } else if(now-S.lastPitchT>250){S.curPc=null;S.candPc=-1;S.candFrames=0;S.candFreq=0}
+  S.events=S.events.filter(e=>now-e.t<WINDOW);
+
+  document.documentElement.style.setProperty("--energy",Math.min(1,S.rms*9).toFixed(3));
+  document.body.classList.toggle("paused", now-S.silenceSince>PAUSE_AFTER);
+  updateMood(now);
+  renderStrip(now);
+  maybeWrite(now);
+}
+
+function firePulse(){
+  const d=document.createElement("div");
+  d.className="pulse";
+  document.body.appendChild(d);
+  setTimeout(()=>d.remove(),1200);
+}
+
+/* ───────── features & mood ───────── */
+function features(now){
+  const spm=Math.round(S.strums.length*(60000/WINDOW));
+  const evs=S.events;
+  let minorish=0,steps=0,midiSum=0;
+  for(let i=1;i<evs.length;i++){
+    const iv=Math.abs(evs[i].pc-evs[i-1].pc)%12;steps++;
+    if(iv===1||iv===3||iv===8||iv===10) minorish++;
+  }
+  for(const e of evs) midiSum+=e.midi;
+  const darkness=steps?minorish/steps:0;
+  const density=evs.length*(10000/WINDOW);
+  const register=evs.length?Math.min(1,Math.max(0,(midiSum/evs.length-55)/25)):0.5;
+  const energy=Math.min(1,S.rms*9);
+  return {
+    notes:[...new Set(evs.map(e=>NOTE_NAMES[e.pc]))].slice(0,8),
+    spm,energy:+energy.toFixed(2),darkness:+darkness.toFixed(2),
+    density:+density.toFixed(1),register:+register.toFixed(2),
+  };
+}
+
+function moodScores(f){
+  const spmN=Math.min(1,f.spm/110), dens=Math.min(1,f.density/14),
+        e=f.energy,d=f.darkness,reg=f.register;
+  const bell=(x,c,w)=>Math.max(0,1-Math.abs(x-c)/w);
+  return {
+    frantic:       (spmN>.6?1:0)*(spmN*.55+e*.45),
+    restless:      dens*.35+bell(d,.5,.35)*.3+e*.35,
+    triumphant:    (1-d)*.3+e*.4+reg*.3,
+    joyful:        (1-d)*.4+bell(spmN,.5,.45)*.3+e*.3,
+    playful:       (1-d)*.3+dens*.45+(1-e)*.25,
+    tender:        (1-d)*.3+(1-e)*.4+(1-dens)*.3,
+    contemplative: bell(d,.12,.3)*.35+(1-spmN)*.3+(1-dens)*.2+(1-e)*.15,
+    wistful:       bell(d,.45,.25)*.5+(1-spmN)*.3+(1-e)*.2,
+    melancholy:    d*.45+(1-spmN)*.3+(1-e)*.25,
+    brooding:      d*.4+(1-reg)*.35+e*.25,
+  };
+}
+
+function updateMood(now){
+  if(!S.events.length && now-S.silenceSince>5000){setMood("silent");return}
+  if(S.events.length<3) return;
+  const scores=moodScores(features(now));
+  let top="wistful",topV=-1;
+  for(const k in scores) if(scores[k]>topV){top=k;topV=scores[k]}
+  if(top!==S.mood && topV<S.moodScore+0.07) return;
+  setMood(top,topV);
+}
+function setMood(m,score=0){
+  if(m===S.mood){S.moodScore=score;return}
+  S.mood=m;S.moodScore=score;
+  if(m!=="silent"&&(!S.moodHist.length||S.moodHist.at(-1)!==m)) S.moodHist.push(m);
+  const p=MOODS[m],r=document.documentElement.style;
+  r.setProperty("--mood-h",p.h);
+  r.setProperty("--mood-s",p.s+"%");
+  r.setProperty("--mood-l",p.l+"%");
+}
+
+function renderStrip(now){
+  const f=features(now);
+  $("tNote").textContent=S.lastNote;
+  $("tStrum").textContent=f.spm;
+  $("tEnergy").textContent=Math.round(f.energy*100)+"%";
+  $("tDark").textContent=Math.round(f.darkness*100)+"%";
+  $("tMood").textContent=S.mood;
+  $("gateTick").style.left=Math.min(98,inputGate()*9*100)+"%";
+  $("status").textContent = S.calibrating ? "calibrating — stay quiet…"
+    : (S.toast&&now-S.toastT<1800) ? S.toast
+    : S.writing ? "writing…"
+    : S.err ? S.err
+    : (now-S.silenceSince>PAUSE_AFTER) ? "paused — play to continue"
+    : "hearing you";
+}
+
+/* ───────── claude calls ───────── */
+async function callClaude(prompt){
+  const headers={"Content-Type":"application/json"};
+  if(S.apiKey){
+    headers["x-api-key"]=S.apiKey;
+    headers["anthropic-version"]="2023-06-01";
+    headers["anthropic-dangerous-direct-browser-access"]="true";
+  }
+  const res=await fetch("https://api.anthropic.com/v1/messages",{
+    method:"POST",headers,
+    body:JSON.stringify({
+      model:"claude-sonnet-4-20250514",
+      max_tokens:1000,
+      messages:[{role:"user",content:prompt}]
+    })
+  });
+  if(!res.ok){
+    let msg="";
+    try{const j=await res.json();msg=(j.error&&j.error.message)||""}catch(e){}
+    throw new Error("api "+res.status+(msg?": "+msg.slice(0,90):""));
+  }
+  const data=await res.json();
+  return (data.content||[]).map(b=>b.type==="text"?b.text:"").join("\n").trim();
+}
+
+/* ───────── the poet ───────── */
+async function maybeWrite(now){
+  if(S.writing||S.finalOpen) return;
+  if(now-S.lastCall<CALL_EVERY) return;
+  if(now-S.silenceSince>PAUSE_AFTER) return;
+  if(S.events.length<4) return;
+  S.lastCall=now;S.writing=true;
+  try{
+    const f=features(now);
+    const sofar=S.poem.slice(-10).join("\n")||"(the page is blank)";
+    const text=await callClaude(
+`You are a poet improvising live while listening to someone play an electric-acoustic ukulele at an event called "Rough Draft" — a showcase for unfinished work. You write the poem in public, draft-style.
+
+What you just heard (last ~12 seconds):
+- notes: ${f.notes.join(", ")||"none clearly"}
+- strums per minute: ${f.spm}
+- energy (0-1): ${f.energy}
+- harmonic darkness (0-1): ${f.darkness}
+- register (0 low - 1 high): ${f.register}
+- detected mood: ${S.mood}
+
+The poem so far:
+${sofar}
+
+Write the NEXT 2 or 3 short lines of the poem (each under 9 words). Rules:
+- Embody the mood "${S.mood}" — but write about anything that mood evokes, never the words "ukulele" or "music" literally. Be concrete and strange, not greeting-card.
+- Lowercase. No rhyming unless the mood is joyful or playful.
+- This is a rough draft: in AT MOST one line, you may revise yourself mid-line by wrapping a rejected word or short phrase in tildes, immediately followed by its replacement. Example: "the harbor lights ~tremble~ flinch"
+- You may wrap ONE word total in *asterisks* to emphasize it.
+- Return ONLY the poem lines, one per line. No preamble, no quotes.`);
+    S.err=null;
+    const lines=text.split("\n").map(s=>s.trim()).filter(Boolean).slice(0,3);
+    for(const ln of lines) await typeLine(ln);
+  }catch(e){
+    console.error(e);
+    if(!S.apiKey){S.err="needs api key";showKeyInput()}
+    else if(String(e).includes("Failed to fetch")) S.err="network/cors error — check connection";
+    else S.err=String(e.message||e).toLowerCase().slice(0,60);
+  }finally{S.writing=false}
+}
+
+function parseLine(raw){
+  const segs=[];let rest=raw;
+  const re=/(~[^~]+~)|(\*[^*]+\*)/;
+  while(rest.length){
+    const m=rest.match(re);
+    if(!m){segs.push({text:rest,kind:"plain"});break}
+    if(m.index>0) segs.push({text:rest.slice(0,m.index),kind:"plain"});
+    const tok=m[0];
+    segs.push(tok[0]==="~"
+      ?{text:tok.slice(1,-1),kind:"struck"}
+      :{text:tok.slice(1,-1),kind:"em"});
+    rest=rest.slice(m.index+tok.length);
+  }
+  return segs;
+}
+
+async function typeLine(raw){
+  S.poem.push(raw.replace(/~[^~]+~\s*/g,"").replace(/\*/g,""));
+  const poemEl=$("poem");
+  [...poemEl.children].forEach(el=>{
+    if(el.classList&&el.classList.contains("old")) el.classList.replace("old","older");
+    else if(el.classList&&el.classList.contains("line")) el.classList.add("old");
+  });
+  while(poemEl.querySelectorAll(".line").length>9)
+    poemEl.removeChild(poemEl.querySelector(".line"));
+  document.querySelectorAll("#cursor").forEach(c=>c.remove());
+
+  const lineEl=document.createElement("div");
+  lineEl.className="line shown";
+  poemEl.appendChild(lineEl);
+  const cursor=document.createElement("span");
+  cursor.id="cursor";
+
+  for(const seg of parseLine(raw)){
+    const span=document.createElement("span");
+    if(seg.kind==="struck") span.className="struck";
+    if(seg.kind==="em"){
+      const em=document.createElement("em");
+      span.appendChild(em);
+      lineEl.appendChild(span);lineEl.appendChild(cursor);
+      for(const ch of seg.text){em.textContent+=ch;await sleep(46+Math.random()*60)}
+      continue;
+    }
+    lineEl.appendChild(span);lineEl.appendChild(cursor);
+    for(const ch of seg.text){
+      span.textContent+=ch;
+      await sleep(seg.kind==="struck"?28:46+Math.random()*60);
+    }
+    if(seg.kind==="struck") await sleep(650);
+  }
+  cursor.remove();
+  poemEl.appendChild(cursor.cloneNode());
+  await sleep(700);
+}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+/* ───────── finalize: bind → title+annotate → manuscript page ───────── */
+const BIND_MSGS=["binding the draft…","reading it back…","titling…","annotating the margins…"];
+
+async function titleAndAnnotate(){
+  if(S.titledAt===S.poem.length&&S.title) return;   /* cached */
+  const numbered=S.poem.map((l,i)=>i+": "+l).join("\n");
+  const raw=await callClaude(
+`Here is a poem that was improvised live from ukulele playing. Moods detected during the session, in order: ${S.moodHist.join(", ")||"unknown"}.
+
+Poem (lines indexed from 0):
+${numbered}
+
+Return ONLY valid JSON (no markdown fences, no commentary) in exactly this shape:
+{"title":"<a short evocative lowercase title, 2-5 words, no quotes inside>","annotations":[{"i":<line index>,"emotion":"<one lowercase word>","note":"<an emotional margin-note for that line, under 7 words, lowercase>"}]}
+
+Annotate every line. Vary the emotion words — be precise (e.g. yearning, defiant, hushed, giddy), not generic.`);
+  const clean=raw.replace(/```json|```/g,"").trim();
+  const parsed=JSON.parse(clean);
+  S.title=(parsed.title||"untitled draft").trim();
+  S.annotations={};
+  for(const a of (parsed.annotations||[]))
+    if(typeof a.i==="number") S.annotations[a.i]={emotion:String(a.emotion||"").trim(),note:String(a.note||"").trim()};
+  S.titledAt=S.poem.length;
+}
+
+function renderPage(){
+  $("pTitle").textContent=S.title||"untitled draft";
+  const stamp=new Date().toLocaleDateString(undefined,{month:"long",day:"numeric",year:"numeric"});
+  $("pMeta").textContent=stamp+(S.moodHist.length?"  ·  "+S.moodHist.join(" → "):"");
+  const wrap=$("pLines");wrap.innerHTML="";
+  if(!S.poem.length){
+    wrap.innerHTML="<div class='pline'>(the page is still blank — play something first)</div>";
+  }
+  S.poem.forEach((l,i)=>{
+    const row=document.createElement("div");
+    row.className="pline";
+    const t=document.createElement("span");
+    t.className="ptext";t.textContent=l;
+    row.appendChild(t);
+    const a=S.annotations[i];
+    if(a&&a.emotion){
+      row.classList.add("noted");
+      const c=emotionColor(a.emotion);
+      row.style.setProperty("--emC",`hsl(${c.h},${c.s}%,${c.l}%)`);
+      row.style.setProperty("--emA",`hsla(${c.h},${c.s}%,${c.l}%,.14)`);
+      const n=document.createElement("span");
+      n.className="pnote";
+      n.textContent=a.emotion+(a.note?" — "+a.note:"");
+      row.appendChild(n);
+    }
+    wrap.appendChild(row);
+  });
+  const moodP=MOODS[S.moodHist.at(-1)||"wistful"]||MOODS.wistful;
+  $("page").style.setProperty("--pg-bg-mood",`hsl(${moodP.h},30%,14%)`);
+  if($("page").classList.contains("theme-mood"))
+    $("page").style.background=`hsl(${moodP.h},30%,14%)`;
+  else $("page").style.background="";
+  $("pFoot").textContent="rough draft · written live by a ukulele & a language model";
+}
+
+async function openFinal(){
+  if(S.finalOpen) return;
+  S.finalOpen=true;
+  const bind=$("binding");
+  bind.classList.remove("hidden");bind.classList.add("fadein");
+  let mi=0;
+  const cycle=setInterval(()=>{
+    mi=(mi+1)%BIND_MSGS.length;
+    $("bindMsg").textContent=BIND_MSGS[mi];
+  },1100);
+  const minWait=sleep(1600);
+  try{ if(S.poem.length) await Promise.race([titleAndAnnotate(),sleep(9000)]); }
+  catch(e){
+    console.warn("title/annotate failed",e);
+    if(!S.title) S.title=S.poem[0]?S.poem[0].split(" ").slice(0,4).join(" "):"untitled draft";
+  }
+  await minWait;
+  clearInterval(cycle);
+  renderPage();
+  bind.classList.add("hidden");bind.classList.remove("fadein");
+  const fin=$("final");
+  fin.classList.remove("hidden");fin.classList.add("fadein");
+}
+function closeFinal(){
+  S.finalOpen=false;
+  $("final").classList.add("hidden");$("final").classList.remove("fadein");
+}
+
+/* customization segs */
+document.querySelectorAll(".seg[data-set]").forEach(seg=>{
+  seg.addEventListener("click",e=>{
+    const btn=e.target.closest("button");if(!btn)return;
+    seg.querySelectorAll("button").forEach(b=>b.classList.remove("on"));
+    btn.classList.add("on");
+    const set=seg.dataset.set;
+    const pg=$("page");
+    [...pg.classList].forEach(c=>{if(c.startsWith(set+"-"))pg.classList.remove(c)});
+    pg.classList.add(btn.dataset.v);
+    if(set==="theme") renderPage();
+  });
+});
+$("notesToggle").onclick=()=>{
+  S.notesOn=!S.notesOn;
+  $("page").classList.toggle("notes-on",S.notesOn);
+  $("notesToggle").textContent="notes: "+(S.notesOn?"on":"hover");
+};
+
+/* share & export */
+function download(blob,name){
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);a.download=name;
+  document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000);
+}
+$("dlImage").onclick=async()=>{
+  const notesWere=S.notesOn;
+  try{
+    const canvas=await html2canvas($("page"),{scale:2,useCORS:true,
+      backgroundColor:getComputedStyle($("page")).backgroundColor});
+    canvas.toBlob(b=>{
+      const file=new File([b],"rough-draft.png",{type:"image/png"});
+      if(navigator.canShare&&navigator.canShare({files:[file]}))
+        navigator.share({files:[file],title:S.title||"rough draft"}).catch(()=>download(b,"rough-draft.png"));
+      else download(b,"rough-draft.png");
+    },"image/png");
+  }catch(e){console.error(e);alert("image capture failed — see console")}
+};
+$("shareTweet").onclick=async()=>{
+  const btn=$("shareTweet"),orig=btn.textContent;
+  const lines=S.poem.slice(0,4).join("\n");
+  const text=(S.title?S.title+"\n\n":"")+lines+
+    (S.poem.length>4?"\n…":"")+"\n\n— written live by my ukulele";
+  let note="image downloaded — attach it";
+  try{
+    const canvas=await html2canvas($("page"),{scale:2,useCORS:true,
+      backgroundColor:getComputedStyle($("page")).backgroundColor});
+    const blob=await new Promise(r=>canvas.toBlob(r,"image/png"));
+    if(navigator.clipboard&&window.ClipboardItem){
+      await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);
+      note="image copied — paste it into the tweet";
+    } else download(blob,"rough-draft.png");
+  }catch(e){console.warn("image for tweet failed",e);
+    try{download(await new Promise(r=>html2canvas($("page"),{scale:2}).then(c=>c.toBlob(r,"image/png"))),"rough-draft.png")}catch(e2){note="couldn't make image — text only"}}
+  btn.textContent=note;
+  setTimeout(()=>btn.textContent=orig,4000);
+  window.open("https://twitter.com/intent/tweet?text="+
+    encodeURIComponent(text.slice(0,270)),"_blank");
+};
+$("dlPoem").onclick=()=>{
+  const stamp=new Date().toISOString().slice(0,16).replace("T"," ");
+  const txt=[(S.title||"untitled draft"),stamp,"",...S.poem,"",
+    S.moodHist.length?("moods heard: "+S.moodHist.join(" → ")):"",
+    "rough draft · written live by a ukulele & a language model"].join("\n");
+  download(new Blob([txt],{type:"text/plain"}),"rough-draft-poem.txt");
+};
+$("dlAudio").onclick=()=>{
+  if(!S.recorder||(S.recorder.state!=="recording"&&!S.recChunks.length)){
+    alert("no recording in this session (simulate mode has no audio)");return}
+  const finish=()=>{
+    const type=S.recorder.mimeType||"audio/webm";
+    download(new Blob(S.recChunks,{type}),
+      "rough-draft-recording."+(type.includes("ogg")?"ogg":"webm"));
+  };
+  if(S.recorder.state==="recording"){
+    /* wait for the recorder to hand over the final chunk before assembling */
+    S.recorder.addEventListener("dataavailable",()=>setTimeout(finish,0),{once:true});
+    S.recorder.requestData();
+  } else finish();
+};
+function resetDraft(){
+  S.poem=[];S.moodHist=[];$("poem").innerHTML="";
+  S.title=null;S.annotations={};S.titledAt=-1;
+  S.recChunks=[];
+  if(S.recorder&&S.recorder.state==="recording"){S.recorder.stop();
+    setTimeout(()=>{try{S.recChunks=[];S.recorder.start(1000)}catch(e){}},200)}
+  closeFinal();
+  S.toast="fresh page";S.toastT=performance.now();
+}
+$("newDraft").onclick=resetDraft;
+$("newDraftTop").onclick=resetDraft;
+$("closeFinal").onclick=closeFinal;
+$("finishBtn").onclick=openFinal;
+
+/* ───────── inline key control (bottom bar) ───────── */
+function renderKey(){
+  $("keyBtn").textContent="key: "+(S.apiKey?"●●·"+S.apiKey.slice(-4):"blank");
+}
+function openKeyEdit(){
+  $("keyField").style.display="";$("keyOk").style.display="";
+  $("keyDel").style.display=S.apiKey?"":"none";
+  $("keyField").value=S.apiKey||"";$("keyField").focus();
+}
+function closeKeyEdit(){
+  $("keyField").style.display="none";$("keyOk").style.display="none";
+  $("keyDel").style.display="none";
+}
+function showKeyInput(){openKeyEdit()}
+$("keyBtn").onclick=()=>{
+  $("keyField").style.display==="none"?openKeyEdit():closeKeyEdit();
+};
+$("keyOk").onclick=()=>{
+  S.apiKey=$("keyField").value.trim()||null;
+  S.err=null;renderKey();closeKeyEdit();
+  S.toast=S.apiKey?"key saved":"key cleared";S.toastT=performance.now();
+};
+$("keyDel").onclick=()=>{
+  S.apiKey=null;S.err=null;renderKey();closeKeyEdit();
+  S.toast="key deleted";S.toastT=performance.now();
+};
+$("keyField").addEventListener("keydown",e=>{
+  if(e.key==="Enter")$("keyOk").click();
+  if(e.key==="Escape")closeKeyEdit();
+});
+renderKey();
+
+document.addEventListener("keydown",e=>{
+  if(e.target.tagName==="INPUT")return;
+  if(e.key==="f"||e.key==="F"){S.finalOpen?closeFinal():openFinal()}
+  if((e.key==="c"||e.key==="C")&&S.running&&!S.sim){recalibrate()}
+  if(e.key==="]"){S.sens=Math.min(8,S.sens*1.3);
+    S.toast="sensitivity gate × "+S.sens.toFixed(1)+" (stricter)";S.toastT=performance.now()}
+  if(e.key==="["){S.sens=Math.max(.4,S.sens/1.3);
+    S.toast="sensitivity gate × "+S.sens.toFixed(1)+" (looser)";S.toastT=performance.now()}
+});
+
+/* ───────── simulate mode ───────── */
+const SIM_SCENES=[
+  {name:"joyful",pcs:[0,4,7,9],rms:.07,noteP:.05,strumP:.03},
+  {name:"melancholy",pcs:[9,0,4,8],rms:.03,noteP:.02,strumP:.006},
+  {name:"frantic",pcs:[2,5,7,10],rms:.11,noteP:.09,strumP:.09},
+  {name:"contemplative",pcs:[0,7],rms:.02,noteP:.012,strumP:.004},
+];
+let simPhase=0,simScene=0,simSceneT=0;
+function simulateTick(){
+  const now=performance.now();
+  simPhase+=0.016;
+  if(now-simSceneT>20000){simScene=(simScene+1)%SIM_SCENES.length;simSceneT=now}
+  const sc=SIM_SCENES[simScene];
+  S.rms=sc.rms+0.015*Math.sin(simPhase*1.7)+Math.random()*0.01;
+  if(Math.random()<sc.noteP){
+    const pc=sc.pcs[Math.floor(Math.random()*sc.pcs.length)];
+    const midi=60+pc+(Math.random()<.3?12:0);
+    S.events.push({pc,midi,t:now});
+    S.lastNote=NOTE_NAMES[pc]+(Math.floor(midi/12)-1);
+    S.silenceSince=now;
+  }
+  if(Math.random()<sc.strumP){S.strums.push(now);S.silenceSince=now;firePulse()}
+  S.events=S.events.filter(e=>now-e.t<WINDOW);
+  S.strums=S.strums.filter(t=>now-t<WINDOW);
+  document.documentElement.style.setProperty("--energy",Math.min(1,S.rms*9).toFixed(3));
+  document.body.classList.toggle("paused", now-S.silenceSince>PAUSE_AFTER);
+  updateMood(now);
+  renderStrip(now);
+  maybeWrite(now);
+}
+
+/* ───────── boot ───────── */
+$("startBtn").onclick=async()=>{
+  $("gate").classList.add("hidden");
+  S.running=true;
+  try{await startMic()}
+  catch(e){
+    alert("mic blocked. browsers only allow mic on localhost or https — and the claude.ai preview iframe blocks it entirely.\n\nrun locally:\n  npx serve .\nthen open http://localhost:3000/uke_poet.html");
+    $("gate").classList.remove("hidden");S.running=false;
+  }
+};
+$("simBtn").onclick=()=>{
+  $("gate").classList.add("hidden");
+  S.running=true;S.sim=true;simSceneT=performance.now();
+  S.silenceSince=performance.now();
+  requestAnimationFrame(loop);
+};
+</script>
+</body>
+</html>
