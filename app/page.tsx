@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import html2canvas from "html2canvas";
 import Meyda from "meyda";
 import type { MeydaAnalyzer } from "meyda/dist/esm/meyda-wa";
-import { detectChordFromChroma, type ChordQuality } from "@/lib/chords";
+import { detectChordFromChroma, NOTE_NAMES, type ChordQuality } from "@/lib/chords";
 
 const CALL_EVERY = 14000, WINDOW = 12000, PAUSE_AFTER = 4000;
 
@@ -54,11 +54,12 @@ export default function Home() {
       running: false, sim: false,
       calibrating: false, calSamples: [] as number[], noiseFloor: 0.006, sens: 1,
       chords: [] as { name: string; quality: ChordQuality; root: number; confidence: number; t: number }[],
+      noteEvents: [] as { pc: number; t: number }[],
       strums: [] as number[],
       rms: 0, rmsAvg: 0.0001,
       chromaHist: [] as number[][],
       pendingChord: null as string | null,
-      curChord: null as string | null, lastChordT: -1e9, lastEventT: 0,
+      curChord: null as string | null, lastTonalT: -1e9, lastEventT: 0,
       lastChord: "—",
       poem: [] as string[], writing: false, apiKey: null as string | null, lastCall: 0,
       silenceSince: -1e9,
@@ -88,6 +89,8 @@ export default function Home() {
       const AC = window.AudioContext ||
         (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext!;
       S.audio = new AC();
+      /* contexts created after an await can start suspended despite the click */
+      if (S.audio.state === "suspended") await S.audio.resume();
       const src = S.audio.createMediaStreamSource(stream);
       S.meyda = Meyda.createMeydaAnalyzer({
         audioContext: S.audio,
@@ -128,21 +131,34 @@ export default function Home() {
       S.rms = rms;
       if (S.calibrating) { S.calSamples.push(rms); return; }
       const now = performance.now();
-      if (rms < inputGate()) { S.pendingChord = null; return; }
+      if (rms < inputGate()) { S.pendingChord = null; S.chromaHist = []; return; }
 
       S.chromaHist.push(chroma);
-      if (S.chromaHist.length > 4) S.chromaHist.shift();
+      if (S.chromaHist.length > 3) S.chromaHist.shift();
       const avg = S.chromaHist[0].map((_, i) =>
         S.chromaHist.reduce((a, c) => a + c[i], 0) / S.chromaHist.length);
 
+      /* presence: tonal sound counts as playing even before a chord is named —
+         strums, the pause state, and "hearing you" all hang off this */
+      const total = avg.reduce((a, b) => a + b, 0);
+      if (total > 0) {
+        const top4 = [...avg].sort((a, b) => b - a).slice(0, 4).reduce((a, b) => a + b, 0) / total;
+        if (top4 > 0.5) {
+          S.lastTonalT = now; S.silenceSince = now;
+          const domPc = avg.indexOf(Math.max(...avg));
+          const last = S.noteEvents.at(-1);
+          if (!last || last.pc !== domPc || now - last.t > 400)
+            S.noteEvents.push({ pc: domPc, t: now });
+        }
+      }
+
       const det = detectChordFromChroma(avg);
       if (!det) { S.pendingChord = null; return; }
-      S.lastChordT = now;
       /* a chord must survive two consecutive frames before it counts */
       if (S.pendingChord !== det.name) { S.pendingChord = det.name; return; }
       if (det.name !== S.curChord || now - S.lastEventT > 1200) {
         S.chords.push({ ...det, t: now });
-        S.curChord = det.name; S.lastEventT = now; S.silenceSince = now;
+        S.curChord = det.name; S.lastEventT = now;
         S.lastChord = det.name;
       }
     }
@@ -157,12 +173,13 @@ export default function Home() {
 
       S.rmsAvg = S.rmsAvg * 0.97 + S.rms * 0.03;
       if (S.rms > Math.max(S.noiseFloor * 4, S.rmsAvg * 2.2)
-        && now - S.lastChordT < 600
+        && now - S.lastTonalT < 600
         && (!S.strums.length || now - S.strums.at(-1)! > 180)) {
         S.strums.push(now); S.silenceSince = now; firePulse();
       }
       S.strums = S.strums.filter(t => now - t < WINDOW);
       S.chords = S.chords.filter(c => now - c.t < WINDOW);
+      S.noteEvents = S.noteEvents.filter(e => now - e.t < WINDOW);
 
       document.documentElement.style.setProperty("--energy", Math.min(1, S.rms * 9).toFixed(3));
       document.body.classList.toggle("paused", now - S.silenceSince > PAUSE_AFTER);
@@ -196,6 +213,7 @@ export default function Home() {
         if (!progression.length || progression.at(-1) !== c.name) progression.push(c.name);
       return {
         progression: progression.slice(-8),
+        notes: [...new Set(S.noteEvents.map(e => NOTE_NAMES[e.pc]))].slice(0, 8),
         spm,
         energy: +Math.min(1, S.rms * 9).toFixed(2),
         minorness: +Math.min(1, minor / n).toFixed(2),
@@ -292,7 +310,7 @@ export default function Home() {
       if (S.writing || S.finalOpen) return;
       if (now - S.lastCall < CALL_EVERY) return;
       if (now - S.silenceSince > PAUSE_AFTER) return;
-      if (S.chords.length < 2) return;
+      if (S.chords.length < 2 && S.noteEvents.length < 4) return;
       S.lastCall = now; S.writing = true;
       try {
         const f = features();
@@ -301,7 +319,8 @@ export default function Home() {
 `You are a poet improvising live while listening to someone play an electric-acoustic ukulele at an event called "Rough Draft" — a showcase for unfinished work. You write the poem in public, draft-style.
 
 What you just heard (last ~12 seconds):
-- chord progression: ${f.progression.join(" → ") || "none clearly"}
+- chord progression: ${f.progression.join(" → ") || "no full chords — melodic single-note picking"}
+- notes heard: ${f.notes.join(", ") || "none clearly"}
 - chord changes per minute: ${f.changesPerMin}
 - strums per minute: ${f.spm}
 - energy (0-1): ${f.energy}
@@ -640,7 +659,7 @@ Annotate every line. Vary the emotion words — be precise (e.g. yearning, defia
       if (Math.random() < sc.chordP) {
         const ch = sc.chords[Math.floor(Math.random() * sc.chords.length)];
         S.chords.push({ name: ch.name, quality: ch.quality, root: 0, confidence: 1, t: now });
-        S.lastChord = ch.name; S.curChord = ch.name; S.lastChordT = now;
+        S.lastChord = ch.name; S.curChord = ch.name; S.lastTonalT = now;
         S.silenceSince = now;
       }
       if (Math.random() < sc.strumP) { S.strums.push(now); S.silenceSince = now; firePulse(); }

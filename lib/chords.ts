@@ -39,15 +39,19 @@ export function detectChordFromChroma(chroma: number[]): DetectedChord | null {
   if (max <= 0) return null;
 
   /* chord tones = pitch classes that hold their own against the loudest one */
-  const picked = ranked.filter(({ v }) => v >= max * 0.45).slice(0, 4);
+  const picked = ranked.filter(({ v }) => v >= max * 0.4).slice(0, 4);
   if (picked.length < 3) return null;
 
   const confidence = picked.reduce((a, { v }) => a + v, 0);
-  if (confidence < 0.55) return null;
+  if (confidence < 0.45) return null;
 
+  /* strongest pitch class goes first as the likely bass; drop any slash naming.
+     real strums carry overtone smear, so if all 4 pcs don't spell a chord,
+     retry with just the top 3 */
   const notes = picked.map(({ pc }) => NOTE_NAMES[pc]);
-  /* strongest pitch class goes first as the likely bass; drop any slash naming */
-  const symbol = (Chord.detect(notes)[0] || "").split("/")[0];
+  let symbol = (Chord.detect(notes)[0] || "").split("/")[0];
+  if (!symbol && notes.length === 4)
+    symbol = (Chord.detect(notes.slice(0, 3))[0] || "").split("/")[0];
   if (!symbol) return null;
 
   const tonic = Chord.get(symbol).tonic ?? "";
