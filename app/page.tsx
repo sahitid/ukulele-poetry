@@ -5,6 +5,7 @@ import html2canvas from "html2canvas";
 import Meyda from "meyda";
 import type { MeydaAnalyzer } from "meyda/dist/esm/meyda-wa";
 import { detectChordFromChroma, NOTE_NAMES, type ChordQuality } from "@/lib/chords";
+import { moodScores } from "@/lib/mood";
 
 const CALL_EVERY = 14000, WINDOW = 12000, PAUSE_AFTER = 4000;
 
@@ -56,7 +57,7 @@ export default function Home() {
       chords: [] as { name: string; quality: ChordQuality; root: number; confidence: number; t: number }[],
       noteEvents: [] as { pc: number; t: number }[],
       strums: [] as number[],
-      rms: 0, rmsAvg: 0.0001,
+      rms: 0, rmsAvg: 0.0001, rmsPeak: 0.04,
       chromaHist: [] as number[][],
       pendingChord: null as string | null,
       curChord: null as string | null, lastTonalT: -1e9, lastEventT: 0,
@@ -181,7 +182,9 @@ export default function Home() {
       S.chords = S.chords.filter(c => now - c.t < WINDOW);
       S.noteEvents = S.noteEvents.filter(e => now - e.t < WINDOW);
 
-      document.documentElement.style.setProperty("--energy", Math.min(1, S.rms * 9).toFixed(3));
+      /* loudness is judged against the player's own recent peak (slow decay) */
+      S.rmsPeak = Math.max(S.rmsPeak * 0.9995, S.rms, 0.03);
+      document.documentElement.style.setProperty("--energy", energy().toFixed(3));
       document.body.classList.toggle("paused", now - S.silenceSince > PAUSE_AFTER);
       updateMood(now);
       renderStrip(now);
@@ -196,6 +199,9 @@ export default function Home() {
     }
 
     /* ───────── features & mood (from chord qualities) ───────── */
+    /* "how loud, for this player" — full strums near your peak ≈ .7, soft picking ≈ .2 */
+    const energy = () => Math.min(1, S.rms / (S.rmsPeak * 1.4));
+
     function features() {
       const spm = Math.round(S.strums.length * (60000 / WINDOW));
       const cs = S.chords;
@@ -215,29 +221,11 @@ export default function Home() {
         progression: progression.slice(-8),
         notes: [...new Set(S.noteEvents.map(e => NOTE_NAMES[e.pc]))].slice(0, 8),
         spm,
-        energy: +Math.min(1, S.rms * 9).toFixed(2),
+        energy: +energy().toFixed(2),
         minorness: +Math.min(1, minor / n).toFixed(2),
         tension: +Math.min(1, tense / n).toFixed(2),
         floaty: +Math.min(1, floaty / n).toFixed(2),
         changesPerMin: Math.round(changes * (60000 / WINDOW)),
-      };
-    }
-
-    function moodScores(f: ReturnType<typeof features>): Record<string, number> {
-      const spmN = Math.min(1, f.spm / 110), chg = Math.min(1, f.changesPerMin / 24),
-        e = f.energy, m = f.minorness, t = f.tension, fl = f.floaty;
-      const bell = (x: number, c: number, w: number) => Math.max(0, 1 - Math.abs(x - c) / w);
-      return {
-        frantic:       (spmN > .6 ? 1 : 0) * (spmN * .4 + e * .35 + chg * .25),
-        restless:      t * .35 + chg * .3 + e * .35,
-        triumphant:    (1 - m) * .35 + e * .4 + chg * .25,
-        joyful:        (1 - m) * .45 + bell(spmN, .5, .45) * .25 + e * .3,
-        playful:       (1 - m) * .3 + fl * .25 + chg * .3 + (1 - e) * .15,
-        tender:        (1 - m) * .3 + (1 - e) * .45 + (1 - chg) * .25,
-        contemplative: fl * .25 + (1 - spmN) * .3 + (1 - chg) * .25 + (1 - e) * .2,
-        wistful:       bell(m, .5, .3) * .5 + (1 - spmN) * .3 + (1 - e) * .2,
-        melancholy:    m * .45 + (1 - spmN) * .3 + (1 - e) * .25,
-        brooding:      m * .3 + t * .45 + e * .25,
       };
     }
 
@@ -247,7 +235,7 @@ export default function Home() {
       const scores = moodScores(features());
       let top = "wistful", topV = -1;
       for (const k in scores) if (scores[k] > topV) { top = k; topV = scores[k]; }
-      if (top !== S.mood && topV < S.moodScore + 0.07) return;
+      if (top !== S.mood && topV < S.moodScore + 0.04) return;
       setMood(top, topV);
     }
     function setMood(m: string, score = 0) {
@@ -665,7 +653,8 @@ Annotate every line. Vary the emotion words — be precise (e.g. yearning, defia
       if (Math.random() < sc.strumP) { S.strums.push(now); S.silenceSince = now; firePulse(); }
       S.chords = S.chords.filter(c => now - c.t < WINDOW);
       S.strums = S.strums.filter(t => now - t < WINDOW);
-      document.documentElement.style.setProperty("--energy", Math.min(1, S.rms * 9).toFixed(3));
+      S.rmsPeak = Math.max(S.rmsPeak * 0.9995, S.rms, 0.03);
+      document.documentElement.style.setProperty("--energy", energy().toFixed(3));
       document.body.classList.toggle("paused", now - S.silenceSince > PAUSE_AFTER);
       updateMood(now);
       renderStrip(now);
