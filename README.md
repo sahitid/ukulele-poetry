@@ -10,8 +10,9 @@ it was built for an event called **Rough Draft** — a showcase for unfinished t
 
 ## how it works
 
-- 🎤 **it listens.** your mic feeds a pitch detector that's deliberately picky — it calibrates to the room's noise floor and only counts in-tune, held notes as music. talking gets ignored.
-- 🎨 **it feels.** strums per minute, energy, harmonic darkness, and register get mashed into a mood. the whole screen washes itself in that mood's color.
+- 🎤 **it listens.** your mic feeds [Meyda](https://meyda.js.org), which extracts a chroma vector — a 12-note harmonic fingerprint of what's ringing in the room. it calibrates to the noise floor first, so talking gets ignored.
+- 🎸 **it names chords.** the strongest pitch classes go to [Tonal](https://github.com/tonaljs/tonal), which identifies the actual chord — C, Am, G7, Bdim, Csus4 — and a chord only counts once it survives a couple of frames.
+- 🎨 **it feels.** minor-ness, harmonic tension (dim/aug/7ths), floaty sus chords, chord changes, strums, and energy get mashed into a mood. the whole screen washes itself in that mood's color.
 - ✍️ **it writes.** every ~14 seconds, what it heard gets handed to Claude, who improvises the next 2–3 lines of the poem — lowercase, a little strange, occasionally striking out its own words.
 - 📜 **it binds.** press **F** (or "finish draft") and the poem gets a title and tiny emotional margin notes, laid out on a manuscript page. pick paper or ink, serif or mono. save it as an image. tweet it. download the audio of your session.
 
@@ -37,7 +38,8 @@ you'll need an Anthropic API key for the poetry — there's a little `key:` butt
 ## the bones
 
 - [Next.js](https://nextjs.org) (app router) + [Tailwind CSS](https://tailwindcss.com)
-- Web Audio API for pitch detection (autocorrelation, nothing fancy)
+- [Meyda](https://meyda.js.org) for real-time audio analysis (chroma + rms over Web Audio)
+- [Tonal](https://github.com/tonaljs/tonal) for chord identification from the chroma
 - [Claude](https://www.anthropic.com) as the poet
 - [html2canvas](https://html2canvas.hertzen.com) for turning poems into pictures
 - Cormorant Garamond & JetBrains Mono, because a poem deserves a nice outfit

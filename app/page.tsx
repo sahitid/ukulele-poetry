@@ -2,8 +2,10 @@
 
 import { useEffect } from "react";
 import html2canvas from "html2canvas";
+import Meyda from "meyda";
+import type { MeydaAnalyzer } from "meyda/dist/esm/meyda-wa";
+import { detectChordFromChroma, type ChordQuality } from "@/lib/chords";
 
-const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const CALL_EVERY = 14000, WINDOW = 12000, PAUSE_AFTER = 4000;
 
 const MOODS: Record<string, { h: number; s: number; l: number }> = {
@@ -22,11 +24,24 @@ const MOODS: Record<string, { h: number; s: number; l: number }> = {
 
 const BIND_MSGS = ["binding the draft…", "reading it back…", "titling…", "annotating the margins…"];
 
-const SIM_SCENES = [
-  { name: "joyful", pcs: [0, 4, 7, 9], rms: .07, noteP: .05, strumP: .03 },
-  { name: "melancholy", pcs: [9, 0, 4, 8], rms: .03, noteP: .02, strumP: .006 },
-  { name: "frantic", pcs: [2, 5, 7, 10], rms: .11, noteP: .09, strumP: .09 },
-  { name: "contemplative", pcs: [0, 7], rms: .02, noteP: .012, strumP: .004 },
+type SimChord = { name: string; quality: ChordQuality };
+const SIM_SCENES: { name: string; chords: SimChord[]; rms: number; chordP: number; strumP: number }[] = [
+  { name: "joyful",
+    chords: [{ name: "C", quality: "major" }, { name: "G", quality: "major" },
+             { name: "Am", quality: "minor" }, { name: "F", quality: "major" }],
+    rms: .07, chordP: .02, strumP: .03 },
+  { name: "melancholy",
+    chords: [{ name: "Am", quality: "minor" }, { name: "Em", quality: "minor" },
+             { name: "F", quality: "major" }, { name: "Dm", quality: "minor" }],
+    rms: .03, chordP: .008, strumP: .006 },
+  { name: "frantic",
+    chords: [{ name: "E7", quality: "dom7" }, { name: "Bdim", quality: "dim" },
+             { name: "Am", quality: "minor" }, { name: "F#dim", quality: "dim" }],
+    rms: .11, chordP: .05, strumP: .09 },
+  { name: "contemplative",
+    chords: [{ name: "Csus2", quality: "sus" }, { name: "Gsus4", quality: "sus" },
+             { name: "C", quality: "major" }],
+    rms: .02, chordP: .004, strumP: .004 },
 ];
 
 export default function Home() {
@@ -34,17 +49,17 @@ export default function Home() {
     /* ───────── state ───────── */
     const S = {
       audio: null as AudioContext | null,
-      analyser: null as AnalyserNode | null,
-      td: null as Float32Array<ArrayBuffer> | null,
+      meyda: null as MeydaAnalyzer | null,
       micStream: null as MediaStream | null,
       running: false, sim: false,
       calibrating: false, calSamples: [] as number[], noiseFloor: 0.006, sens: 1,
-      events: [] as { pc: number; midi: number; t: number }[],
+      chords: [] as { name: string; quality: ChordQuality; root: number; confidence: number; t: number }[],
       strums: [] as number[],
       rms: 0, rmsAvg: 0.0001,
-      candPc: -1, candFreq: 0, candFrames: 0,
-      curPc: null as number | null, lastPitchT: -1e9, lastEventT: 0,
-      lastNote: "—",
+      chromaHist: [] as number[][],
+      pendingChord: null as string | null,
+      curChord: null as string | null, lastChordT: -1e9, lastEventT: 0,
+      lastChord: "—",
       poem: [] as string[], writing: false, apiKey: null as string | null, lastCall: 0,
       silenceSince: -1e9,
       mood: "silent", moodScore: 0, moodHist: [] as string[],
@@ -74,10 +89,16 @@ export default function Home() {
         (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext!;
       S.audio = new AC();
       const src = S.audio.createMediaStreamSource(stream);
-      S.analyser = S.audio.createAnalyser();
-      S.analyser.fftSize = 4096;
-      src.connect(S.analyser);
-      S.td = new Float32Array(S.analyser.fftSize);
+      S.meyda = Meyda.createMeydaAnalyzer({
+        audioContext: S.audio,
+        source: src,
+        bufferSize: 4096,
+        featureExtractors: ["chroma", "rms"],
+        callback: (f: { chroma?: number[]; rms?: number }) => {
+          if (f.chroma && typeof f.rms === "number") onFeatures(f.chroma, f.rms);
+        },
+      });
+      S.meyda.start();
       try {
         S.recorder = new MediaRecorder(stream);
         S.recChunks = [];
@@ -88,7 +109,7 @@ export default function Home() {
       loop();
     }
 
-    /* ───────── music gates (speech fails, strings pass) ───────── */
+    /* ───────── chord listening (speech fails, harmony passes) ───────── */
     function inputGate() { return Math.max(0.009, S.noiseFloor * 2.6) * S.sens; }
     function recalibrate() {
       S.calibrating = true; S.calSamples = [];
@@ -101,61 +122,47 @@ export default function Home() {
         S.toast = "recalibrated · floor " + S.noiseFloor.toFixed(3); S.toastT = performance.now();
       }, 1400);
     }
-    function detectPitch(buf: Float32Array, sr: number) {
-      let r0 = 0;
-      for (let i = 0; i < buf.length; i++) r0 += buf[i] * buf[i];
-      S.rms = Math.sqrt(r0 / buf.length);
-      if (S.rms < inputGate()) return null;
-      const SIZE = buf.length;
-      const MAX = Math.floor(sr / 190), MIN = Math.floor(sr / 1100);
-      let best = -1, bestC = 0;
-      for (let lag = MIN; lag <= MAX; lag++) {
-        let c = 0;
-        for (let i = 0; i < SIZE - lag; i++) c += buf[i] * buf[i + lag];
-        if (c > bestC) { bestC = c; best = lag; }
+
+    /* runs every analysis frame (~93ms): chroma → chord, with smoothing + stability */
+    function onFeatures(chroma: number[], rms: number) {
+      S.rms = rms;
+      if (S.calibrating) { S.calSamples.push(rms); return; }
+      const now = performance.now();
+      if (rms < inputGate()) { S.pendingChord = null; return; }
+
+      S.chromaHist.push(chroma);
+      if (S.chromaHist.length > 4) S.chromaHist.shift();
+      const avg = S.chromaHist[0].map((_, i) =>
+        S.chromaHist.reduce((a, c) => a + c[i], 0) / S.chromaHist.length);
+
+      const det = detectChordFromChroma(avg);
+      if (!det) { S.pendingChord = null; return; }
+      S.lastChordT = now;
+      /* a chord must survive two consecutive frames before it counts */
+      if (S.pendingChord !== det.name) { S.pendingChord = det.name; return; }
+      if (det.name !== S.curChord || now - S.lastEventT > 1200) {
+        S.chords.push({ ...det, t: now });
+        S.curChord = det.name; S.lastEventT = now; S.silenceSince = now;
+        S.lastChord = det.name;
       }
-      if (best < 0) return null;
-      if (bestC / r0 < 0.5) return null;
-      const f = sr / best;
-      if (f < 190 || f > 1100) return null;
-      const midiFloat = 69 + 12 * Math.log2(f / 440);
-      if (Math.abs(midiFloat - Math.round(midiFloat)) > 0.42) return null;
-      return { f, midi: Math.round(midiFloat) };
     }
 
     function loop() {
       if (!S.running) return;
       requestAnimationFrame(loop);
       if (S.sim) { simulateTick(); return; }
-      S.analyser!.getFloatTimeDomainData(S.td!);
       const now = performance.now();
-      const p = detectPitch(S.td!, S.audio!.sampleRate);
 
-      if (S.calibrating) { S.calSamples.push(S.rms); renderStrip(now); return; }
+      if (S.calibrating) { renderStrip(now); return; }
 
       S.rmsAvg = S.rmsAvg * 0.97 + S.rms * 0.03;
       if (S.rms > Math.max(S.noiseFloor * 4, S.rmsAvg * 2.2)
-        && now - S.lastPitchT < 350
+        && now - S.lastChordT < 600
         && (!S.strums.length || now - S.strums.at(-1)! > 180)) {
         S.strums.push(now); S.silenceSince = now; firePulse();
       }
       S.strums = S.strums.filter(t => now - t < WINDOW);
-
-      if (p) {
-        const pc = ((p.midi % 12) + 12) % 12;
-        const stable = !!S.candFreq && Math.abs(p.f - S.candFreq) / S.candFreq < 0.025;
-        if (pc === S.candPc && stable) S.candFrames++;
-        else { S.candPc = pc; S.candFreq = p.f; S.candFrames = 1; }
-        if (S.candFrames >= 4 && (pc !== S.curPc || now - S.lastEventT > 400)) {
-          S.events.push({ pc, midi: p.midi, t: now });
-          S.curPc = pc; S.lastEventT = now; S.silenceSince = now;
-          S.lastNote = NOTE_NAMES[pc] + (Math.floor(p.midi / 12) - 1);
-        }
-        S.lastPitchT = now;
-      } else if (now - S.lastPitchT > 250) {
-        S.curPc = null; S.candPc = -1; S.candFrames = 0; S.candFreq = 0;
-      }
-      S.events = S.events.filter(e => now - e.t < WINDOW);
+      S.chords = S.chords.filter(c => now - c.t < WINDOW);
 
       document.documentElement.style.setProperty("--energy", Math.min(1, S.rms * 9).toFixed(3));
       document.body.classList.toggle("paused", now - S.silenceSince > PAUSE_AFTER);
@@ -171,48 +178,54 @@ export default function Home() {
       setTimeout(() => d.remove(), 1200);
     }
 
-    /* ───────── features & mood ───────── */
+    /* ───────── features & mood (from chord qualities) ───────── */
     function features() {
       const spm = Math.round(S.strums.length * (60000 / WINDOW));
-      const evs = S.events;
-      let minorish = 0, steps = 0, midiSum = 0;
-      for (let i = 1; i < evs.length; i++) {
-        const iv = Math.abs(evs[i].pc - evs[i - 1].pc) % 12; steps++;
-        if (iv === 1 || iv === 3 || iv === 8 || iv === 10) minorish++;
-      }
-      for (const e of evs) midiSum += e.midi;
-      const darkness = steps ? minorish / steps : 0;
-      const density = evs.length * (10000 / WINDOW);
-      const register = evs.length ? Math.min(1, Math.max(0, (midiSum / evs.length - 55) / 25)) : 0.5;
-      const energy = Math.min(1, S.rms * 9);
+      const cs = S.chords;
+      let minor = 0, tense = 0, floaty = 0, changes = 0;
+      cs.forEach((c, i) => {
+        if (c.quality === "minor") minor++;
+        else if (c.quality === "dim" || c.quality === "aug") { tense++; minor += 0.5; }
+        else if (c.quality === "sus") floaty++;
+        else if (c.quality === "dom7") tense += 0.5;
+        if (i > 0 && c.name !== cs[i - 1].name) changes++;
+      });
+      const n = Math.max(1, cs.length);
+      const progression: string[] = [];
+      for (const c of cs)
+        if (!progression.length || progression.at(-1) !== c.name) progression.push(c.name);
       return {
-        notes: [...new Set(evs.map(e => NOTE_NAMES[e.pc]))].slice(0, 8),
-        spm, energy: +energy.toFixed(2), darkness: +darkness.toFixed(2),
-        density: +density.toFixed(1), register: +register.toFixed(2),
+        progression: progression.slice(-8),
+        spm,
+        energy: +Math.min(1, S.rms * 9).toFixed(2),
+        minorness: +Math.min(1, minor / n).toFixed(2),
+        tension: +Math.min(1, tense / n).toFixed(2),
+        floaty: +Math.min(1, floaty / n).toFixed(2),
+        changesPerMin: Math.round(changes * (60000 / WINDOW)),
       };
     }
 
     function moodScores(f: ReturnType<typeof features>): Record<string, number> {
-      const spmN = Math.min(1, f.spm / 110), dens = Math.min(1, f.density / 14),
-        e = f.energy, d = f.darkness, reg = f.register;
+      const spmN = Math.min(1, f.spm / 110), chg = Math.min(1, f.changesPerMin / 24),
+        e = f.energy, m = f.minorness, t = f.tension, fl = f.floaty;
       const bell = (x: number, c: number, w: number) => Math.max(0, 1 - Math.abs(x - c) / w);
       return {
-        frantic:       (spmN > .6 ? 1 : 0) * (spmN * .55 + e * .45),
-        restless:      dens * .35 + bell(d, .5, .35) * .3 + e * .35,
-        triumphant:    (1 - d) * .3 + e * .4 + reg * .3,
-        joyful:        (1 - d) * .4 + bell(spmN, .5, .45) * .3 + e * .3,
-        playful:       (1 - d) * .3 + dens * .45 + (1 - e) * .25,
-        tender:        (1 - d) * .3 + (1 - e) * .4 + (1 - dens) * .3,
-        contemplative: bell(d, .12, .3) * .35 + (1 - spmN) * .3 + (1 - dens) * .2 + (1 - e) * .15,
-        wistful:       bell(d, .45, .25) * .5 + (1 - spmN) * .3 + (1 - e) * .2,
-        melancholy:    d * .45 + (1 - spmN) * .3 + (1 - e) * .25,
-        brooding:      d * .4 + (1 - reg) * .35 + e * .25,
+        frantic:       (spmN > .6 ? 1 : 0) * (spmN * .4 + e * .35 + chg * .25),
+        restless:      t * .35 + chg * .3 + e * .35,
+        triumphant:    (1 - m) * .35 + e * .4 + chg * .25,
+        joyful:        (1 - m) * .45 + bell(spmN, .5, .45) * .25 + e * .3,
+        playful:       (1 - m) * .3 + fl * .25 + chg * .3 + (1 - e) * .15,
+        tender:        (1 - m) * .3 + (1 - e) * .45 + (1 - chg) * .25,
+        contemplative: fl * .25 + (1 - spmN) * .3 + (1 - chg) * .25 + (1 - e) * .2,
+        wistful:       bell(m, .5, .3) * .5 + (1 - spmN) * .3 + (1 - e) * .2,
+        melancholy:    m * .45 + (1 - spmN) * .3 + (1 - e) * .25,
+        brooding:      m * .3 + t * .45 + e * .25,
       };
     }
 
     function updateMood(now: number) {
-      if (!S.events.length && now - S.silenceSince > 5000) { setMood("silent"); return; }
-      if (S.events.length < 3) return;
+      if (!S.chords.length && now - S.silenceSince > 5000) { setMood("silent"); return; }
+      if (S.chords.length < 2) return;
       const scores = moodScores(features());
       let top = "wistful", topV = -1;
       for (const k in scores) if (scores[k] > topV) { top = k; topV = scores[k]; }
@@ -231,10 +244,10 @@ export default function Home() {
 
     function renderStrip(now: number) {
       const f = features();
-      $("tNote").textContent = S.lastNote;
+      $("tChord").textContent = S.lastChord;
       $("tStrum").textContent = String(f.spm);
       $("tEnergy").textContent = Math.round(f.energy * 100) + "%";
-      $("tDark").textContent = Math.round(f.darkness * 100) + "%";
+      $("tMinor").textContent = Math.round(f.minorness * 100) + "%";
       $("tMood").textContent = S.mood;
       $("gateTick").style.left = Math.min(98, inputGate() * 9 * 100) + "%";
       $("status").textContent = S.calibrating ? "calibrating — stay quiet…"
@@ -279,7 +292,7 @@ export default function Home() {
       if (S.writing || S.finalOpen) return;
       if (now - S.lastCall < CALL_EVERY) return;
       if (now - S.silenceSince > PAUSE_AFTER) return;
-      if (S.events.length < 4) return;
+      if (S.chords.length < 2) return;
       S.lastCall = now; S.writing = true;
       try {
         const f = features();
@@ -288,11 +301,13 @@ export default function Home() {
 `You are a poet improvising live while listening to someone play an electric-acoustic ukulele at an event called "Rough Draft" — a showcase for unfinished work. You write the poem in public, draft-style.
 
 What you just heard (last ~12 seconds):
-- notes: ${f.notes.join(", ") || "none clearly"}
+- chord progression: ${f.progression.join(" → ") || "none clearly"}
+- chord changes per minute: ${f.changesPerMin}
 - strums per minute: ${f.spm}
 - energy (0-1): ${f.energy}
-- harmonic darkness (0-1): ${f.darkness}
-- register (0 low - 1 high): ${f.register}
+- minorness (0-1): ${f.minorness}
+- harmonic tension, dim/aug/7th chords (0-1): ${f.tension}
+- suspension, unresolved sus chords (0-1): ${f.floaty}
 - detected mood: ${S.mood}
 
 The poem so far:
@@ -622,15 +637,14 @@ Annotate every line. Vary the emotion words — be precise (e.g. yearning, defia
       if (now - simSceneT > 20000) { simScene = (simScene + 1) % SIM_SCENES.length; simSceneT = now; }
       const sc = SIM_SCENES[simScene];
       S.rms = sc.rms + 0.015 * Math.sin(simPhase * 1.7) + Math.random() * 0.01;
-      if (Math.random() < sc.noteP) {
-        const pc = sc.pcs[Math.floor(Math.random() * sc.pcs.length)];
-        const midi = 60 + pc + (Math.random() < .3 ? 12 : 0);
-        S.events.push({ pc, midi, t: now });
-        S.lastNote = NOTE_NAMES[pc] + (Math.floor(midi / 12) - 1);
+      if (Math.random() < sc.chordP) {
+        const ch = sc.chords[Math.floor(Math.random() * sc.chords.length)];
+        S.chords.push({ name: ch.name, quality: ch.quality, root: 0, confidence: 1, t: now });
+        S.lastChord = ch.name; S.curChord = ch.name; S.lastChordT = now;
         S.silenceSince = now;
       }
       if (Math.random() < sc.strumP) { S.strums.push(now); S.silenceSince = now; firePulse(); }
-      S.events = S.events.filter(e => now - e.t < WINDOW);
+      S.chords = S.chords.filter(c => now - c.t < WINDOW);
       S.strums = S.strums.filter(t => now - t < WINDOW);
       document.documentElement.style.setProperty("--energy", Math.min(1, S.rms * 9).toFixed(3));
       document.body.classList.toggle("paused", now - S.silenceSince > PAUSE_AFTER);
@@ -659,6 +673,7 @@ Annotate every line. Vary the emotion words — be precise (e.g. yearning, defia
     return () => {
       S.running = false;
       document.removeEventListener("keydown", onKeydown);
+      try { S.meyda?.stop(); } catch {}
       try { if (S.recorder && S.recorder.state === "recording") S.recorder.stop(); } catch {}
       S.micStream?.getTracks().forEach(t => t.stop());
       S.audio?.close().catch(() => {});
@@ -676,10 +691,10 @@ Annotate every line. Vary the emotion words — be precise (e.g. yearning, defia
 
       <div id="strip">
         <span id="status">waiting</span>
-        <span>note <b id="tNote">—</b></span>
+        <span>chord <b id="tChord">—</b></span>
         <span>strums/min <b id="tStrum">0</b></span>
         <span>energy <b id="tEnergy">0%</b></span>
-        <span>dark <b id="tDark">0%</b></span>
+        <span>minor <b id="tMinor">0%</b></span>
         <span><span id="moodDot"></span><b id="tMood">—</b></span>
         <div id="meter"><i></i><s id="gateTick"></s></div>
         <span id="keyCtl">
@@ -694,10 +709,10 @@ Annotate every line. Vary the emotion words — be precise (e.g. yearning, defia
       <div className="overlay" id="gate">
         <h1>play, and it writes.<br />badly at first. that&apos;s the point.</h1>
         <p>a ukulele feeds a poet. it calibrates to the room, ignores talking,
-           and only counts in-tune, held notes as music. color is the mood it hears,
-           pulses are your strums, and the draft revises itself in public.
-           F finishes the draft · C recalibrates the room · [ and ] adjust sensitivity.
-           your api key lives in the bottom bar.</p>
+           and listens for the actual chords you strum — major, minor, sus, the works.
+           color is the mood it hears, pulses are your strums, and the draft revises
+           itself in public. F finishes the draft · C recalibrates the room ·
+           [ and ] adjust sensitivity. your api key lives in the bottom bar.</p>
         <div className="row">
           <button className="btn" id="startBtn">start listening</button>
           <button className="btn ghost" id="simBtn">simulate (no uke)</button>
