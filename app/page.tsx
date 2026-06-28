@@ -304,7 +304,7 @@ export default function Home() {
         const f = features();
         const sofar = S.poem.slice(-10).join("\n") || "(the page is blank)";
         const text = await callClaude(
-`You are a poet improvising live while listening to someone play an electric-acoustic ukulele at an event called "Rough Draft" — a showcase for unfinished work. You write the poem in public, draft-style.
+`You are a poet improvising live while listening to someone play an electric-acoustic ukulele at an event called "Ukulele Poetry" — a showcase for unfinished work. You write the poem in public, draft-style.
 
 What you just heard (last ~12 seconds):
 - chord progression: ${f.progression.join(" → ") || "no full chords — melodic single-note picking"}
@@ -453,7 +453,7 @@ Annotate every line. Vary the emotion words — be precise (e.g. yearning, defia
       if ($("page").classList.contains("theme-mood"))
         $("page").style.background = `hsl(${moodP.h},30%,14%)`;
       else $("page").style.background = "";
-      $("pFoot").textContent = "rough draft · written live by a ukulele & a language model";
+      $("pFoot").textContent = "ukulele poetry · written live by a ukulele & a language model";
     }
 
     async function openFinal() {
@@ -517,10 +517,10 @@ Annotate every line. Vary the emotion words — be precise (e.g. yearning, defia
           backgroundColor: getComputedStyle($("page")).backgroundColor });
         canvas.toBlob(b => {
           if (!b) return;
-          const file = new File([b], "rough-draft.png", { type: "image/png" });
+          const file = new File([b], "ukulele-poetry.png", { type: "image/png" });
           if (navigator.canShare && navigator.canShare({ files: [file] }))
-            navigator.share({ files: [file], title: S.title || "rough draft" }).catch(() => download(b, "rough-draft.png"));
-          else download(b, "rough-draft.png");
+            navigator.share({ files: [file], title: S.title || "ukulele poetry" }).catch(() => download(b, "ukulele-poetry.png"));
+          else download(b, "ukulele-poetry.png");
         }, "image/png");
       } catch (e) { console.error(e); alert("image capture failed — see console"); }
     };
@@ -537,13 +537,13 @@ Annotate every line. Vary the emotion words — be precise (e.g. yearning, defia
         if (blob && navigator.clipboard && window.ClipboardItem) {
           await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
           note = "image copied — paste it into the tweet";
-        } else if (blob) download(blob, "rough-draft.png");
+        } else if (blob) download(blob, "ukulele-poetry.png");
       } catch (e) {
         console.warn("image for tweet failed", e);
         try {
           const blob = await new Promise<Blob | null>(r =>
             html2canvas($("page"), { scale: 2 }).then(c => c.toBlob(r, "image/png")));
-          if (blob) download(blob, "rough-draft.png");
+          if (blob) download(blob, "ukulele-poetry.png");
         } catch { note = "couldn't make image — text only"; }
       }
       btn.textContent = note;
@@ -555,8 +555,8 @@ Annotate every line. Vary the emotion words — be precise (e.g. yearning, defia
       const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
       const txt = [(S.title || "untitled draft"), stamp, "", ...S.poem, "",
         S.moodHist.length ? ("moods heard: " + S.moodHist.join(" → ")) : "",
-        "rough draft · written live by a ukulele & a language model"].join("\n");
-      download(new Blob([txt], { type: "text/plain" }), "rough-draft-poem.txt");
+        "ukulele poetry · written live by a ukulele & a language model"].join("\n");
+      download(new Blob([txt], { type: "text/plain" }), "ukulele-poetry-poem.txt");
     };
     $("dlAudio").onclick = () => {
       if (!S.recorder || (S.recorder.state !== "recording" && !S.recChunks.length)) {
@@ -565,7 +565,7 @@ Annotate every line. Vary the emotion words — be precise (e.g. yearning, defia
       const finish = () => {
         const type = S.recorder!.mimeType || "audio/webm";
         download(new Blob(S.recChunks, { type }),
-          "rough-draft-recording." + (type.includes("ogg") ? "ogg" : "webm"));
+          "ukulele-poetry-recording." + (type.includes("ogg") ? "ogg" : "webm"));
       };
       if (S.recorder.state === "recording") {
         /* wait for the recorder to hand over the final chunk before assembling */
@@ -661,6 +661,38 @@ Annotate every line. Vary the emotion words — be precise (e.g. yearning, defia
       maybeWrite(now);
     }
 
+    /* ───────── intro: real video if present, else the photo animates ─────────
+       starts on the intro, then slides up ("scrolls down") into the landing. */
+    const intro = $("intro");
+    const introVideo = $<HTMLVideoElement>("introVideo");
+    let introDismissed = false, stillTimer = 0;
+    function dismissIntro() {
+      if (introDismissed) return;
+      introDismissed = true;
+      intro.classList.add("done");
+      clearTimeout(stillTimer);
+      try { introVideo.pause(); } catch {}
+      setTimeout(() => intro.classList.add("gone"), 1300);
+    }
+    /* no playable video → let the still photo's slow zoom run, then auto-advance */
+    function fallBackToStill() {
+      if (introDismissed || stillTimer) return;
+      stillTimer = window.setTimeout(dismissIntro, 7000);
+    }
+    introVideo.addEventListener("playing", () => {
+      clearTimeout(stillTimer); stillTimer = 0;
+      introVideo.classList.add("playing");
+    });
+    introVideo.addEventListener("ended", dismissIntro);
+    introVideo.addEventListener("error", fallBackToStill);
+    introVideo.play?.().then(fallBackToStill).catch(fallBackToStill);
+    $("introSkip").onclick = dismissIntro;
+    intro.addEventListener("wheel", e => { if (e.deltaY > 0) dismissIntro(); }, { passive: true });
+    intro.addEventListener("click", e => {
+      if ((e.target as HTMLElement).id === "introSkip") return;
+      if (introVideo.paused) introVideo.play?.().catch(() => {});
+    });
+
     /* ───────── boot ───────── */
     $("startBtn").onclick = async () => {
       $("gate").classList.add("hidden");
@@ -691,6 +723,27 @@ Annotate every line. Vary the emotion words — be precise (e.g. yearning, defia
 
   return (
     <>
+      <div id="intro">
+        <div id="introStill"></div>
+        <video
+          id="introVideo"
+          autoPlay
+          muted
+          playsInline
+          preload="auto"
+        >
+          <source src="/intro.mp4" type="video/mp4" />
+        </video>
+        <div id="introVeil"></div>
+        <div id="introCaption">
+          <span className="kicker">ukulele poetry</span>
+          <span className="sub">the instrument that writes</span>
+        </div>
+        <button id="introSkip" title="skip the intro">
+          enter <span aria-hidden="true">↓</span>
+        </button>
+      </div>
+
       <div id="wash"></div>
       <div id="grain"></div>
 
@@ -715,15 +768,25 @@ Annotate every line. Vary the emotion words — be precise (e.g. yearning, defia
       </div>
 
       <div className="overlay" id="gate">
-        <h1>play, and it writes.<br />badly at first. that&apos;s the point.</h1>
-        <p>a ukulele feeds a poet. it calibrates to the room, ignores talking,
-           and listens for the actual chords you strum — major, minor, sus, the works.
-           color is the mood it hears, pulses are your strums, and the draft revises
-           itself in public. F finishes the draft · C recalibrates the room ·
-           [ and ] adjust sensitivity. your api key lives in the bottom bar.</p>
-        <div className="row">
-          <button className="btn" id="startBtn">start listening</button>
-          <button className="btn ghost" id="simBtn">simulate (no uke)</button>
+        <div className="gate-inner">
+          <span className="eyebrow">ukulele poetry</span>
+          <h1>you play.<br />it writes along.</h1>
+          <p className="lead">
+            start strumming and a few lines of a poem show up, written as it
+            listens. it picks up on the mood, second-guesses itself, leaves the
+            crossed-out words in. the color is whatever it&apos;s feeling, the ripples
+            are your strums. none of it is meant to be finished.
+          </p>
+          <div className="row">
+            <button className="btn" id="startBtn">start listening</button>
+            <button className="btn ghost" id="simBtn">simulate (no uke)</button>
+          </div>
+          <ul className="legend">
+            <li><kbd>F</kbd> finish the draft</li>
+            <li><kbd>C</kbd> recalibrate the room</li>
+            <li><kbd>[</kbd> <kbd>]</kbd> adjust sensitivity</li>
+            <li>api key lives in the bottom bar</li>
+          </ul>
         </div>
       </div>
 

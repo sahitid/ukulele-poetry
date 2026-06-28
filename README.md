@@ -1,4 +1,4 @@
-# rough draft 🎶✍️
+# ukulele poetry 🎶✍️
 
 *the instrument that writes*
 
@@ -6,7 +6,7 @@ play a ukulele, and a poet writes along with you — live, in public, badly at f
 
 this little app listens to the room, figures out the *mood* of what you're playing (joyful? brooding? frantic?), and asks Claude to scribble the next few lines of a poem. it second-guesses itself, crosses words out mid-line, and keeps going. when you're done, it binds everything into a tiny manuscript page you can save, share, or quietly delete forever.
 
-it was built for an event called **Rough Draft** — a showcase for unfinished things.
+it was built for an event called **Ukulele Poetry** — a showcase for unfinished things.
 
 ## how it works
 
@@ -58,4 +58,4 @@ vercel
 
 ---
 
-*rough draft · written live by a ukulele & a language model*
+*ukulele poetry · written live by a ukulele & a language model*

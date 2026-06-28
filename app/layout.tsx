@@ -16,7 +16,7 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "rough draft — the instrument that writes",
+  title: "ukulele poetry — the instrument that writes",
   description:
     "a ukulele feeds a poet. play, and it writes — badly at first. that's the point.",
 };

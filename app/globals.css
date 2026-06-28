@@ -1,5 +1,77 @@
 @import "tailwindcss";
 
+/* ───── intro video (plays first, then slides up into the landing) ───── */
+#intro {
+  position: fixed; inset: 0; z-index: 30; overflow: hidden;
+  background: #000;
+  transition: transform 1.2s cubic-bezier(.76, 0, .24, 1), opacity 1.2s ease;
+}
+#intro.done { transform: translateY(-100%); opacity: 0; }
+#intro.gone { display: none; }
+/* the photo: slow cinematic zoom/pan, shown until a real video plays */
+#introStill {
+  position: absolute; inset: 0;
+  background: url("/intro-poster.png") center / cover no-repeat;
+  transform-origin: 60% 40%;
+  animation: kenburns 14s ease-out both;
+}
+@keyframes kenburns {
+  from { transform: scale(1.02) translate3d(0, 0, 0); }
+  to   { transform: scale(1.16) translate3d(-1.5%, -2%, 0); }
+}
+#introVideo {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; object-position: center;
+  opacity: 0; transition: opacity .7s ease;
+}
+#introVideo.playing { opacity: 1; }
+#introVeil {
+  position: absolute; inset: 0; pointer-events: none;
+  background:
+    radial-gradient(120% 90% at 50% 30%, transparent 40%, rgba(0,0,0,.5) 100%),
+    linear-gradient(to bottom, rgba(0,0,0,.35), transparent 30%, transparent 55%, rgba(0,0,0,.75));
+}
+#introCaption {
+  position: absolute; left: 6vw; bottom: 13vh; display: flex; flex-direction: column;
+  gap: 6px; text-align: left;
+  animation: introUp 1.4s cubic-bezier(.2,.7,.2,1) both;
+}
+#introCaption .kicker {
+  font-family: var(--font-cormorant), Georgia, serif;
+  font-style: italic; font-weight: 500; font-size: clamp(34px, 6vw, 76px);
+  line-height: 1; color: #f3ecdc; letter-spacing: -0.01em;
+  text-shadow: 0 2px 30px rgba(0,0,0,.6);
+}
+#introCaption .sub {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: clamp(10px, 1.4vw, 13px); letter-spacing: .34em; text-transform: uppercase;
+  color: color-mix(in srgb, #f3ecdc 72%, transparent);
+}
+#introSkip {
+  position: absolute; right: 6vw; bottom: 13vh;
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 12px; letter-spacing: .22em; text-transform: lowercase;
+  color: #f3ecdc; background: rgba(0,0,0,.25);
+  border: 1px solid rgba(243,236,220,.4); border-radius: 999px;
+  padding: 11px 22px; cursor: pointer;
+  backdrop-filter: blur(4px);
+  display: inline-flex; align-items: center; gap: 8px;
+  transition: background .25s ease, border-color .25s ease, transform .25s ease;
+  animation: introUp 1.4s cubic-bezier(.2,.7,.2,1) both;
+}
+#introSkip:hover {
+  background: rgba(0,0,0,.45); border-color: #f3ecdc; transform: translateY(-1px);
+}
+#introSkip span { animation: nudge 1.6s ease-in-out infinite; }
+@keyframes introUp { from { opacity: 0; transform: translateY(18px) } to { opacity: 1; transform: none } }
+@keyframes nudge { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(4px) } }
+@media (prefers-reduced-motion: reduce) {
+  #intro { transition: opacity .4s ease; }
+  #intro.done { transform: none; }
+  #introStill { animation: none; }
+  #introSkip span { animation: none; }
+}
+
 :root {
   --ink: #0b0e14;
   --paper: #ede6d6;
@@ -158,6 +230,47 @@ body.paused #poem { opacity: .6; transition: opacity 1.5s ease }
   letter-spacing: .12em; color: color-mix(in srgb, var(--paper) 55%, transparent);
   max-width: 56ch; line-height: 1.9;
 }
+
+/* ───── landing (gate) ───── */
+#gate .gate-inner {
+  display: flex; flex-direction: column; align-items: center; gap: 22px;
+  max-width: 60ch;
+}
+#gate .eyebrow {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 11px; letter-spacing: .32em; text-transform: uppercase;
+  color: hsl(38, 60%, 64%);
+}
+#gate .eyebrow::before, #gate .eyebrow::after {
+  content: ""; display: inline-block; width: 28px; height: 1px;
+  vertical-align: middle; margin: 0 12px;
+  background: color-mix(in srgb, var(--paper) 28%, transparent);
+}
+#gate h1 { margin: 0; }
+#gate .lead {
+  max-width: 52ch; font-size: 13px; line-height: 2;
+  color: color-mix(in srgb, var(--paper) 62%, transparent);
+}
+#gate .row { margin-top: 4px; }
+#gate .legend {
+  list-style: none; margin: 14px 0 0; padding: 18px 0 0;
+  display: flex; flex-wrap: wrap; gap: 10px 22px; justify-content: center;
+  border-top: 1px solid color-mix(in srgb, var(--paper) 12%, transparent);
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 11px; letter-spacing: .12em; text-transform: lowercase;
+  color: color-mix(in srgb, var(--paper) 42%, transparent);
+}
+#gate .legend li { display: inline-flex; align-items: center; gap: 7px; }
+#gate kbd {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 10px; line-height: 1; color: var(--paper);
+  background: color-mix(in srgb, var(--paper) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--paper) 22%, transparent);
+  border-radius: 4px; padding: 4px 7px; min-width: 18px; text-align: center;
+}
+.btn { transition: filter .2s ease, transform .2s ease, border-color .2s ease; }
+.btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.btn.ghost:hover { border-color: hsl(38, 70%, 62%); }
 .btn {
   font-family: var(--font-jetbrains), ui-monospace, monospace; font-size: 12px;
   letter-spacing: .16em; text-transform: lowercase; color: var(--ink);
