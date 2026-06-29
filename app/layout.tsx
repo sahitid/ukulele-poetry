@@ -15,10 +15,27 @@ const jetbrains = JetBrains_Mono({
   weight: ["300", "400"],
 });
 
+const siteUrl =
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://ukulele-poetry.vercel.app";
+const description =
+  "play a ukulele and a few lines of a poem show up, written live as it listens. nothing here is meant to be finished.";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
   title: "ukulele poetry — the instrument that writes",
-  description:
-    "a ukulele feeds a poet. play, and it writes — badly at first. that's the point.",
+  description,
+  openGraph: {
+    type: "website",
+    siteName: "ukulele poetry",
+    title: "ukulele poetry",
+    description,
+    url: "/",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "ukulele poetry",
+    description,
+  },
 };
 
 export default function RootLayout({
